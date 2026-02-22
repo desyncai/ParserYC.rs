@@ -1,20 +1,26 @@
 # Parsing YC
 
-Scraping and structured data extraction pipeline for every Y Combinator company page. Three iterations — each version rebuilt from scratch based on what the previous one got wrong.
-
 ```
 5,723 companies. 11,286 founders. 42,779 links. One SQLite file.
 ```
 
+## Why This Exists
+
+This started as a class project in November 2025 — a [group assignment](https://github.com/MDaly27/Desync-Data-Processing-Extension) to scrape and process data from the Y Combinator company directory. The original goal was straightforward: pull every company page, extract structured fields, store them in SQLite.
+
+The class version worked. But it left me wondering how far the pipeline could actually go — how fast, how clean, how reliable. So I kept iterating. Three versions later, I'd rewritten the entire system twice, dropped Python entirely, switched from HTML to markdown, and built a structural parser that processes 5,700+ pages in 8 seconds with zero errors.
+
+What started as curiosity about the data became an engineering challenge about the pipeline itself.
+
 ## The Evolution
 
-### v1 — Proof of Concept
+### [v1](v1/) — The Class Project
 
-**Stack:** Python (Desync API) + Rust (8 sequential regex passes)
+**Stack:** Python + Rust | **When:** November 2025
 
-The first attempt. Python scrapes raw HTML via the Desync API, dumps it into SQLite, then a single Rust binary runs 8 sequential passes over the text (`pass1.rs` through `pass8.rs`). Each pass extracts one thing — slug, batch, status, tags, founders, news, links — using regex on raw scraped text.
+The [original version](https://github.com/MDaly27/Desync-Data-Processing-Extension). Python scrapes raw HTML via the Desync API, dumps it into SQLite, then a single Rust binary runs 8 sequential regex passes over the text — `pass1.rs` through `pass8.rs`. Each pass extracts one thing: slug, batch, status, tags, founders, news, links.
 
-**What worked:** Proved the end-to-end pipeline. Rust regex over raw text is fast enough.
+**What worked:** Proved the end-to-end pipeline. Rust regex over raw text is fast enough. The basic structure — scrape, store, parse — was right.
 
 **What didn't:** 8 passes on raw HTML is brittle. Order matters. Each pass operates on the full text, so later passes re-scan content that earlier passes already consumed. No parallelism. Python + Rust glue code is annoying to maintain.
 
@@ -22,25 +28,27 @@ The first attempt. Python scrapes raw HTML via the Desync API, dumps it into SQL
 Sitemaps → Python Desync scraper → raw text → 8 Rust regex passes → SQLite
 ```
 
-### v2 — Better Architecture, Same Foundation
+### [v2](v2/) — The Refactor
 
-**Stack:** Python (Desync API, Typer, Pydantic) + Rust (WorkItem abstraction, optional Rayon)
+**Stack:** Python + Rust | **Insight:** stop re-scanning text you've already matched
 
-Addressed v1's structural problems without changing the core approach. Introduced `WorkItem` to carry state through passes and `WorkingText` for progressive text consumption — each pass removes what it matched, so later passes work on a shrinking buffer instead of re-scanning everything. Split into two Rust binaries (companies + jobs). Added per-pass metrics, structured logging (`tracing`), and a proper Python CLI layer with Typer.
+Kept the same foundation but fixed v1's biggest architectural problem. Introduced `WorkingText` — a buffer that *shrinks* with every pass. Each pass removes what it matched, so later passes only see what's left. No more redundant scanning.
 
-**What worked:** `WorkingText` eliminated redundant scanning. Metrics showed exactly where time went. Modular Python layer was much cleaner.
+Split the Rust side into two binaries (companies + jobs), added per-pass metrics with `PassTracker` so I could see exactly where time went, and built a proper Python CLI layer with Typer and structured logging via `tracing`.
 
-**What didn't:** Still scraping raw HTML. Still using Desync. Still two languages bolted together. The fundamental problem — regex on unstructured HTML — remained.
+**What worked:** `WorkingText` eliminated redundant scanning. Metrics showed exactly where time went. The modular Python layer was much cleaner.
+
+**What didn't:** Still scraping raw HTML. Still using Desync. Still two languages bolted together. The progressive consumption fixed the scanning problem, but not the real one — regex on unstructured HTML is fundamentally fragile.
 
 ```
-Sitemaps → Python Desync scraper → raw text → WorkItem pipeline → SQLite
+Sitemaps → Python Desync scraper → raw text → WorkItem pipeline (shrinking buffer) → SQLite
 ```
 
-### v3 — Clean Slate
+### [v3](v3/) — Clean Slate
 
-**Stack:** Pure Rust. Single binary. No Python.
+**Stack:** Pure Rust | **Insight:** don't parse HTML — parse markdown
 
-Threw out the Desync scraper and the HTML-first approach entirely. v3 uses [spider.cloud](https://spider.cloud) to fetch pages as **markdown** instead of HTML — which turns out to be the key insight. Markdown has predictable structure: headings, links, and text blocks that map directly to the data we want.
+Threw out the Desync scraper, the HTML-first approach, and Python entirely. v3 uses [spider.cloud](https://spider.cloud) to fetch pages as **markdown** instead of HTML — which turns out to be the key insight. Markdown has predictable structure: headings, links, and text blocks that map directly to the data we want.
 
 The parser is a 3-pass structural pipeline instead of 8 sequential regex passes:
 
@@ -70,9 +78,9 @@ The scraping is the easy part. The hard part is parsing 5,700+ semi-structured p
 
 **Single binary, no venv.** v1 and v2 required Python 3.12+, a venv, pip dependencies, and a separate Rust build. v3 is `cargo build` and done. No dependency conflicts, no "works on my machine" — the Cargo.toml is the complete specification.
 
-## Version Comparison
+## At a Glance
 
-| | v1 | v2 | v3 |
+| | [v1](v1/) | [v2](v2/) | [v3](v3/) |
 |--|----|----|-----|
 | Languages | Python + Rust | Python + Rust | Rust |
 | Scraper | Desync API | Desync API | spider.cloud |
@@ -84,24 +92,17 @@ The scraping is the easy part. The hard part is parsing 5,700+ semi-structured p
 
 The biggest lever wasn't even Rust or parallelism — it was switching from HTML to markdown. Markdown gives you structure for free. You don't need to fight `<div>` soup to find a founder's name when it's just a line of text followed by social links.
 
-## Quick Start (v3)
+## The Data
 
-```bash
-cd v3
-export SPIDER_API_KEY="your-key"
+The final v3 pipeline produces a 68 MB SQLite database with 9 normalized tables. Some highlights:
 
-cargo run -- init        # Fetch sitemap → 5,723 URLs
-cargo run -- scrape      # Scrape all (streams to DB)
-cargo run -- process     # Parse → structured tables
-cargo run -- run         # Scrape + process in one shot
-cargo run -- overview    # Company table (--status, --batch, -n)
-cargo run -- stats       # Pipeline progress
-```
+| | |
+|---|---|
+| **Companies** | 5,723 (69% active, 741 acquired, 23 public) |
+| **Founders** | 11,286 — 93% have LinkedIn, 40% have Twitter/X |
+| **External links** | 42,779 (LinkedIn alone accounts for 15,280) |
+| **Top location** | San Francisco (37% of all YC companies) |
+| **Peak batch** | Winter 2022 (399 companies) |
+| **AI prevalence** | ~2,373 AI-related tag mentions — nearly half of all companies |
 
-## Project Layout
-
-```
-v1/                     Python + Rust, Desync API, 8-pass regex
-v2/                     Python + Rust, Desync API, WorkItem pipeline
-v3/                     Pure Rust, spider.cloud, 3-pass structural parser
-```
+Full dataset breakdown in [`v3/stats.md`](v3/stats.md).
