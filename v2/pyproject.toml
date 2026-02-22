@@ -1,0 +1,7 @@
+[project]
+name = "yc-parsing-v2"
+version = "2.0.0"
+description = "YC company data processing - v2: Refactored with WorkItem abstraction, tracing, rayon parallelism, and metrics"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["desync-search", "httpx", "tenacity", "pydantic", "rich", "typer"]

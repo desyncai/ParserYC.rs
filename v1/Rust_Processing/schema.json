@@ -1,0 +1,59 @@
+{
+     "tables": {
+          "companies": [
+               "slug TEXT PRIMARY KEY",
+               "name TEXT NOT NULL",
+               "tagline TEXT",
+               "batch_season TEXT",
+               "batch_year INTEGER",
+               "status TEXT",
+               "location TEXT",
+               "founded_year INTEGER",
+               "team_size INTEGER",
+               "primary_partner TEXT",
+               "job_count INTEGER DEFAULT 0",
+               "is_hiring INTEGER DEFAULT 0",
+               "source_url TEXT NOT NULL"
+          ],
+          "tags": [
+               "company_slug TEXT NOT NULL REFERENCES companies(slug)",
+               "tag TEXT NOT NULL",
+               "PRIMARY KEY (company_slug, tag)"
+          ],
+          "founders": [
+               "id INTEGER PRIMARY KEY AUTOINCREMENT",
+               "company_slug TEXT NOT NULL REFERENCES companies(slug)",
+               "name TEXT NOT NULL",
+               "title TEXT",
+               "UNIQUE (company_slug, name)"
+          ],
+          "news": [
+               "id INTEGER PRIMARY KEY AUTOINCREMENT",
+               "company_slug TEXT NOT NULL REFERENCES companies(slug)",
+               "title TEXT NOT NULL",
+               "source TEXT",
+               "published_date TEXT",
+               "UNIQUE (company_slug, title)"
+          ],
+          "links": [
+               "id INTEGER PRIMARY KEY AUTOINCREMENT",
+               "company_slug TEXT NOT NULL REFERENCES companies(slug)",
+               "founder_id INTEGER",
+               "url TEXT NOT NULL",
+               "pattern TEXT",
+               "UNIQUE (company_slug, url)",
+               "FOREIGN KEY (founder_id) REFERENCES founders(id) ON DELETE SET NULL"
+          ]
+     },
+     "indexes": [
+          ["idx_companies_batch", "companies", "batch_season, batch_year"],
+          ["idx_companies_status", "companies", "status"],
+          ["idx_companies_location", "companies", "location"],
+          ["idx_tags_tag", "tags", "tag"],
+          ["idx_founders_company", "founders", "company_slug"],
+          ["idx_news_company", "news", "company_slug"],
+          ["idx_links_company", "links", "company_slug"],
+          ["idx_links_pattern", "links", "pattern"],
+          ["idx_links_founder", "links", "founder_id"]
+     ]
+}

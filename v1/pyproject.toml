@@ -1,0 +1,7 @@
+[project]
+name = "yc-parsing-v1"
+version = "1.0.0"
+description = "YC company data processing - v1: Sequential 8-pass Rust pipeline with basic Python scrapers"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["desync-search", "httpx", "tenacity"]

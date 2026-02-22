@@ -1,0 +1,7 @@
+desync-search
+httpx
+pydantic>=2
+rich
+typer[all]
+tenacity
+uv

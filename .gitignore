@@ -1,0 +1,45 @@
+# Rust
+**/target/
+**/Cargo.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# SQLite databases
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Environment & secrets
+.env
+*.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Serena
+.serena/
+
+# Docs / plans (session artifacts)
+docs/
+
+# Marimo cache
+**/__marimo__/
+
+# Analysis output
+v3_analysis/
