@@ -4,6 +4,7 @@ pub mod jobs;
 pub mod links;
 pub mod meetings;
 pub mod news;
+pub mod partners;
 
 use super::sections::Section;
 use crate::db::*;

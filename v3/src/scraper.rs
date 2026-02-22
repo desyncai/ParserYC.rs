@@ -205,6 +205,39 @@ async fn scrape_one(spider: &Spider, page_id: i64, url: &str, slug: &str) -> Res
     }
 }
 
+/// Scrape a single URL and return its markdown content.
+pub async fn scrape_single_page(url: &str) -> Result<String> {
+    let api_key = std::env::var("SPIDER_API_KEY")
+        .map_err(|_| anyhow::anyhow!("SPIDER_API_KEY environment variable must be set"))?;
+    let spider = Spider::new(Some(api_key))
+        .map_err(|e| anyhow::anyhow!("Failed to create Spider client: {}", e))?;
+
+    let params = RequestParams {
+        return_format: Some(ReturnFormatHandling::Single(ReturnFormat::Markdown)),
+        ..Default::default()
+    };
+
+    let response = spider
+        .scrape_url(url, Some(params), "application/json")
+        .await
+        .map_err(|e| anyhow::anyhow!("Spider scrape failed: {}", e))?;
+
+    let parsed: serde_json::Value = match response.as_str() {
+        Some(s) => serde_json::from_str(s).unwrap_or(response.clone()),
+        None => response,
+    };
+
+    let content = parsed
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|obj| obj.get("content"))
+        .and_then(|c| c.as_str())
+        .map(strip_images)
+        .ok_or_else(|| anyhow::anyhow!("No content in spider response"))?;
+
+    Ok(content)
+}
+
 /// Remove markdown image syntax: ![alt](url) and [![alt](url)](link)
 fn strip_images(md: &str) -> String {
     let re = Regex::new(r"!\[[^\]]*\]\([^)]*\)").unwrap();

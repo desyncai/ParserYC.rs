@@ -136,6 +136,24 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_meeting_company ON meeting_links(company_slug);
         CREATE INDEX IF NOT EXISTS idx_meeting_type ON meeting_links(link_type);
+
+        CREATE TABLE IF NOT EXISTS partners (
+            slug        TEXT PRIMARY KEY,
+            url         TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            title       TEXT,
+            bio         TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS company_partners (
+            company_slug  TEXT NOT NULL REFERENCES companies(slug),
+            partner_slug  TEXT NOT NULL REFERENCES partners(slug),
+            match_method  TEXT NOT NULL CHECK(match_method IN ('url','name')),
+            UNIQUE(company_slug, partner_slug)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cp_company ON company_partners(company_slug);
+        CREATE INDEX IF NOT EXISTS idx_cp_partner ON company_partners(partner_slug);
         ",
     )?;
     Ok(())
@@ -403,6 +421,102 @@ pub fn save_meeting_links(conn: &Connection, rows: &[MeetingLinkRow]) -> Result<
     }
     tx.commit()?;
     Ok(())
+}
+
+// ── Partners ──
+
+pub struct PartnerRow {
+    pub slug: String,
+    pub url: String,
+    pub name: String,
+    pub title: Option<String>,
+    pub bio: Option<String>,
+}
+
+pub struct CompanyPartnerRow {
+    pub company_slug: String,
+    pub partner_slug: String,
+    pub match_method: String, // "url" or "name"
+}
+
+pub fn save_partners(conn: &Connection, rows: &[PartnerRow]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut count = 0;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO partners (slug, url, name, title, bio)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for r in rows {
+            count += stmt.execute(rusqlite::params![r.slug, r.url, r.name, r.title, r.bio])?;
+        }
+    }
+    tx.commit()?;
+    Ok(count)
+}
+
+pub fn fetch_partners(conn: &Connection) -> Result<Vec<PartnerRow>> {
+    let mut stmt = conn.prepare("SELECT slug, url, name, title, bio FROM partners")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PartnerRow {
+                slug: row.get(0)?,
+                url: row.get(1)?,
+                name: row.get(2)?,
+                title: row.get(3)?,
+                bio: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn save_company_partners(conn: &Connection, rows: &[CompanyPartnerRow]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut count = 0;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR IGNORE INTO company_partners (company_slug, partner_slug, match_method)
+             VALUES (?1, ?2, ?3)",
+        )?;
+        for r in rows {
+            count += stmt.execute(rusqlite::params![
+                r.company_slug, r.partner_slug, r.match_method
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(count)
+}
+
+/// Fetch company slugs + their raw markdown for partner URL matching.
+pub fn fetch_scraped_markdown(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT pd.slug, pd.markdown
+         FROM page_data pd
+         WHERE pd.markdown IS NOT NULL",
+    )?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Fetch companies with primary_partner set but no entry in company_partners yet.
+pub fn fetch_unmatched_partners(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.slug, c.primary_partner
+         FROM companies c
+         WHERE c.primary_partner IS NOT NULL
+           AND c.primary_partner != ''
+           AND NOT EXISTS (
+               SELECT 1 FROM company_partners cp WHERE cp.company_slug = c.slug
+           )",
+    )?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 // ── Overview ──

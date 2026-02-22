@@ -36,6 +36,8 @@ enum Commands {
         #[arg(short = 'n', long)]
         limit: Option<usize>,
     },
+    /// Scrape YC partners page, store partners, match to companies
+    Partners,
     /// Show scraping statistics
     Stats,
     /// Companies overview table
@@ -181,6 +183,11 @@ async fn main() -> anyhow::Result<()> {
             println!("\n{} companies | slug: /companies/<slug>", rows.len());
             Ok(())
         }
+        Commands::Partners => {
+            let conn = db::connect()?;
+            db::init_schema(&conn)?;
+            run_partners(&conn).await
+        }
         Commands::Stats => {
             let conn = db::connect()?;
             db::init_schema(&conn)?;
@@ -201,6 +208,74 @@ async fn main() -> anyhow::Result<()> {
     }
 
     result
+}
+
+async fn run_partners(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    use std::collections::{HashMap, HashSet};
+
+    // ── Pass 1: Scrape and store partners ──
+    println!("Fetching https://www.ycombinator.com/people ...");
+    let markdown = scraper::scrape_single_page("https://www.ycombinator.com/people").await?;
+    let partner_rows = parser::extract::partners::parse_partners_page(&markdown);
+    if partner_rows.is_empty() {
+        println!("No partners found in page. Check markdown format.");
+        return Ok(());
+    }
+    let saved = db::save_partners(conn, &partner_rows)?;
+    println!("Saved {} partners.", saved);
+
+    // Build lookup maps
+    let all_partners = db::fetch_partners(conn)?;
+    let slug_set: HashSet<&str> = all_partners.iter().map(|p| p.slug.as_str()).collect();
+    let name_to_slug: HashMap<String, String> = all_partners
+        .iter()
+        .map(|p| (p.name.to_lowercase(), p.slug.clone()))
+        .collect();
+
+    // ── Pass 2a: URL matching ──
+    println!("Matching partners to companies (URL scan)...");
+    let pages = db::fetch_scraped_markdown(conn)?;
+    let mut url_matches: Vec<db::CompanyPartnerRow> = Vec::new();
+
+    for (company_slug, md) in &pages {
+        let found_slugs = parser::extract::partners::find_partner_urls_in_markdown(md);
+        for ps in found_slugs {
+            if slug_set.contains(ps.as_str()) {
+                url_matches.push(db::CompanyPartnerRow {
+                    company_slug: company_slug.clone(),
+                    partner_slug: ps,
+                    match_method: "url".to_string(),
+                });
+            }
+        }
+    }
+    let url_count = db::save_company_partners(conn, &url_matches)?;
+    println!("  URL matches: {} links saved.", url_count);
+
+    // ── Pass 2b: Name matching (fallback) ──
+    println!("Matching partners to companies (name fallback)...");
+    let unmatched = db::fetch_unmatched_partners(conn)?;
+    let mut name_matches: Vec<db::CompanyPartnerRow> = Vec::new();
+
+    for (company_slug, partner_name) in &unmatched {
+        if let Some(partner_slug) = name_to_slug.get(&partner_name.to_lowercase()) {
+            name_matches.push(db::CompanyPartnerRow {
+                company_slug: company_slug.clone(),
+                partner_slug: partner_slug.clone(),
+                match_method: "name".to_string(),
+            });
+        }
+    }
+    let name_count = db::save_company_partners(conn, &name_matches)?;
+    println!("  Name matches: {} links saved.", name_count);
+
+    println!(
+        "\nDone: {} total company-partner links ({} url, {} name).",
+        url_count + name_count,
+        url_count,
+        name_count
+    );
+    Ok(())
 }
 
 struct ProcessCounts {
